@@ -1,153 +1,179 @@
+import functools as ft
+from collections import namedtuple
+from pysmt.shortcuts import Not
 import pysmt.typing as types
 import pysmt.operators as op
 from pysmt.walkers import DagWalker
 
-from pysmt_sim.decorator import debug
+type_dict = {"Bool": "bool", "Int": "int", "Real": "double"}
+includes = ["\"bit_vector.h\"", "<cmath>", "<fstream>"]
+Arg = namedtuple("Arg", ["name", "type"])
+
+def get_type_str(formula):
+    name = formula.get_type().basename
+    if name in type_dict:
+        return type_dict[name]
+    raise NotImplementedError
+
+def walk_variadic(evaluate, op):
+    def walk_op(self, formula, args, **kwargs):
+        if len(args) == 1: # unary
+            intermediate = f"({op}{args[0]})"
+        else: # n-ary
+            intermediate = "(" + f" {op} ".join(args) + ")"
+        if evaluate:
+            type_str = get_type_str(formula)
+            var = f"{type_str}{self.var_cnt[type_str]}"
+            declare = f"{type_str} {var} = {intermediate};"
+            self.code.append(declare)
+            self.var_cnt[type_str] += 1
+            return var
+        else:
+	        return intermediate
+    return walk_op
+
+def walk_unsupported():
+    def walk_op(self, formula, args, **kwargs):
+        raise NotImplementedError
+    return walk_op
+
+walk_evaluate = ft.partial(walk_variadic, True)
+walk_intermediate = ft.partial(walk_variadic, False)
 
 class CodeGenWalker(DagWalker):
 
     def __init__(self):
         super().__init__()
+        self.var_cnt = {
+            item: 0 for item in type_dict.values()
+        }
+        self.code = []
+        self.args = []
+        self.headers = includes
 
-    @debug
-    def walk_not(self, formula, args, **kwargs):
-        return
+    def gen_code(self, formula, file_name):
+        ret = self.walk(formula)
+        ret_type = get_type_str(formula)
+        with open(file_name, 'w') as f:
+            f.writelines([f"#include {header}\n" for header in self.headers])
+            f.write("\nusing namespace std;\n")
+            self.write_func(ret_type, ret, f)
+            self.write_main(f)
+            
+    def write_func(self, func_type, ret_name, file):
+        file.write(f"\n{func_type} formula (" + ", ".join([f"{arg.type} {arg.name}" for arg in self.args]) + ")\n")
+        file.write("{\n")
+        file.writelines([f"\t{code}\n" for code in self.code])
+        file.write(f"\treturn {ret_name};\n")
+        file.write("}\n")
 
-    @debug
+    def write_main(self, file):
+        file.write("\nint main (int argc, char **argv) {\n"
+                    + "\tifstream file (argv[1]);\n"
+                    + "\tif (file.is_open()) {\n"
+                    + "\t\tint num_line;\n"
+                    + "\t\tfile >> num_line;\n"
+                    + "\t\tfor (int i = 0; i < num_line; ++i) {\n")
+        file.writelines([f"\t\t\t{arg.type} var_{i};\n" for i, arg in enumerate(self.args)])
+        file.writelines([f"\t\t\tfile >> var_{i};\n" for i, _ in enumerate(self.args)])
+        file.write("\t\t\tcout << formula(" + 
+            ", ".join([f"var_{i}" for i, _ in enumerate(self.args)]) +
+            ") << endl;\n"
+        )
+        file.write("\t\t}\n"
+                    + "\t\tfile.close();\n"
+        	        + "\t}\n"
+        	        + "\treturn 0;\n"
+                    + "}\n"
+        )
+            	
     def walk_symbol(self, formula, **kwargs):
-        return
+        type_str = get_type_str(formula)
+        name = formula.symbol_name()
+        self.args.append(Arg(name, type_str))
+        return name
 
-    @debug
+    def _walk_constant(self, formula, args, **kwargs):
+        if formula.constant_type().is_bool_type():
+            ret = str(formula.constant_value()).lower()
+        elif formula.constant_type().is_real_type() or formula.constant_type().is_int_type():
+            ret = str(formula.constant_value())
+        else:
+            raise NotImplementedError
+        return ret
+
     def walk_ite(self, formula, args, **kwargs):
-        return
+        # ite(a, b, c) == a ? b : c
+        type_str = get_type_str(formula)
+        var = f"{type_str}{self.var_cnt[type_str]}"
+        declare = f"{type_str} {var} = {args[0]} ? {args[1]} : {args[2]};"
+        self.code.append(declare)
+        self.var_cnt[type_str] += 1
+        return var
 
-    @debug
-    def walk_real_constant(self, formula, **kwargs):
-        return
+    def walk_implies(self, formula, args, **kwargs):
+        # a->b == !a || b
+        type_str = get_type_str(formula)
+        var = f"{type_str}{self.var_cnt[type_str]}"
+        declare = f"{type_str} {var} = !{args[0]} || {args[1]};"
+        self.code.append(declare)
+        self.var_cnt[type_str] += 1
+        return var
 
-    @debug
-    def walk_int_constant(self, formula, **kwargs):
-        return
+    def walk_pow(self, formula, args, **kwargs):
+        intermediate = "(" + f"pow({args[0]}, {args[1]}) " + ")"
+        return intermediate
 
-    @debug
-    def walk_bool_constant(self, formula, **kwargs):
-        return
+    walk_real_constant = _walk_constant
+    walk_int_constant = _walk_constant
+    walk_bool_constant = _walk_constant
 
-    @debug
-    def walk_quantifier(self, formula, args, **kwargs):
-        return
+    walk_not = walk_evaluate("!")
+    walk_le = walk_evaluate("<=")
+    walk_lt = walk_evaluate("<")
+    walk_equals = walk_evaluate("==")
+    walk_iff = walk_evaluate("==")
+    walk_and = walk_evaluate("&&")
+    walk_or = walk_evaluate("||")
 
-    @debug
-    def walk_toreal(self, formula, args, **kwargs):
-        return
+    walk_div = walk_intermediate("/")
+    walk_minus = walk_intermediate("-")
+    walk_plus = walk_intermediate("+")
+    walk_times = walk_intermediate("*")
 
-    @debug
-    def _z3_func_decl(self, func_name):
-        return
-
-    @debug
-    def walk_function(self, formula, args, **kwargs):
-        return
-
-    @debug
-    def walk_bv_constant(self, formula, **kwargs):
-        return
-
-    @debug
-    def walk_bv_extract(self, formula, args, **kwargs):
-        return
-
-    @debug
-    def walk_bv_not(self, formula, args, **kwargs):
-        return
-
-    @debug
-    def walk_bv_neg(self, formula, args, **kwargs):
-        return
-
-    @debug
-    def walk_bv_rol(self, formula, args, **kwargs):
-        return
-
-    @debug
-    def walk_bv_ror(self, formula, args, **kwargs):
-        return
-
-    @debug
-    def walk_bv_zext(self, formula, args, **kwargs):
-        return
-
-    @debug
-    def walk_bv_sext (self, formula, args, **kwargs):
-        return
-
-    @debug
-    def walk_bv_comp(self, formula, args, **kwargs):
-        return
-
-    @debug
-    def walk_bv_tonatural(self, formula, args, **kwargs):
-        return
-
-    @debug
-    def walk_array_select(self, formula, args, **kwargs):
-        return
-
-    @debug
-    def walk_array_store(self, formula, args, **kwargs):
-        return
-
-    @debug
-    def walk_array_value(self, formula, args, **kwargs):
-        return
-
-    @debug
-    def make_walk_nary(func):
-        def walk_nary(self, formula, args, **kwargs):
-            func()
-            return
-        return walk_nary
-
-    @debug
-    def make_walk_binary(func):
-        def walk_binary(self, formula, args, **kwargs):
-            func()
-            return
-        return walk_binary
-        
-    @debug
-    def empty_func():
-        return
-
-    walk_and     = make_walk_nary(empty_func)
-    walk_or      = make_walk_nary(empty_func)
-    walk_plus    = make_walk_nary(empty_func)
-    walk_times   = make_walk_nary(empty_func)
-    walk_minus   = make_walk_nary(empty_func)
-    walk_implies = make_walk_binary(empty_func)
-    walk_le      = make_walk_binary(empty_func)
-    walk_lt      = make_walk_binary(empty_func)
-    walk_equals  = make_walk_binary(empty_func)
-    walk_iff     = make_walk_binary(empty_func)
-    walk_pow     = make_walk_binary(empty_func)
-    walk_div     = make_walk_binary(empty_func)
-    walk_bv_ult  = make_walk_binary(empty_func)
-    walk_bv_ule  = make_walk_binary(empty_func)
-    walk_bv_slt  = make_walk_binary(empty_func)
-    walk_bv_sle  = make_walk_binary(empty_func)
-    walk_bv_concat = make_walk_binary(empty_func)
-    walk_bv_or   = make_walk_binary(empty_func)
-    walk_bv_and  = make_walk_binary(empty_func)
-    walk_bv_xor  = make_walk_binary(empty_func)
-    walk_bv_add  = make_walk_binary(empty_func)
-    walk_bv_sub  = make_walk_binary(empty_func)
-    walk_bv_mul  = make_walk_binary(empty_func)
-    walk_bv_udiv = make_walk_binary(empty_func)
-    walk_bv_urem = make_walk_binary(empty_func)
-    walk_bv_lshl = make_walk_binary(empty_func)
-    walk_bv_lshr = make_walk_binary(empty_func)
-    walk_bv_sdiv = make_walk_binary(empty_func)
-    walk_bv_srem = make_walk_binary(empty_func)
-    walk_bv_ashr = make_walk_binary(empty_func)
-    walk_exists = walk_quantifier
-    walk_forall = walk_quantifier
+    
+    walk_bv_constant = walk_unsupported
+    walk_bv_neg = walk_unsupported
+    walk_bv_or = walk_unsupported
+    walk_bv_and = walk_unsupported
+    walk_bv_xor = walk_unsupported
+    walk_bv_add = walk_unsupported
+    walk_bv_sub = walk_unsupported
+    walk_bv_udiv = walk_unsupported
+    walk_bv_mul = walk_unsupported
+    walk_bv_rol = walk_unsupported
+    walk_bv_urem = walk_unsupported
+    walk_bv_lshl = walk_unsupported
+    walk_bv_ror = walk_unsupported
+    walk_bv_sdiv = walk_unsupported
+    walk_bv_lshr = walk_unsupported
+    walk_bv_ashr = walk_unsupported
+    walk_bv_srem = walk_unsupported
+    walk_bv_zext = walk_unsupported
+    walk_bv_extract = walk_unsupported
+    walk_bv_concat = walk_unsupported
+    walk_bv_sext = walk_unsupported
+    walk_bv_ult = walk_unsupported
+    walk_bv_comp = walk_unsupported
+    walk_bv_slt = walk_unsupported
+    walk_bv_ule = walk_unsupported
+    walk_bv_tonatural = walk_unsupported
+    walk_bv_sle = walk_unsupported
+    walk_array_store = walk_unsupported
+    walk_array_select = walk_unsupported
+    walk_toreal = walk_unsupported
+    walk_array_value = walk_unsupported
+    walk_quantifier = walk_unsupported
+    walk_function = walk_unsupported
+    walk_forall = walk_unsupported
+    walk_exists = walk_unsupported
