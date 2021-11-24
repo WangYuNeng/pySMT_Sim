@@ -14,8 +14,8 @@ https://github.com/dillonhuff/bsim/
 #define NUM_BYTES_GT_8(N) GEN_NUM_BYTES(N)
 #define NUM_BYTES_GT_4(N) (N <= 64 ? 8 : NUM_BYTES_GT_8(N))
 #define NUM_BYTES_GT_2(N) (N <= 32 ? 4 : NUM_BYTES_GT_4(N))
-#define NUM_BYTES_GT_1(N) (N <= 16 ? 2 : NUM_BYTES_GT_2(N))
-#define NUM_BYTES(N) (N <= 8 ? (1) : NUM_BYTES_GT_1(N))
+// #define NUM_BYTES_GT_1(N) (N <= 16 ? 2 : NUM_BYTES_GT_2(N))
+#define NUM_BYTES(N) NUM_BYTES_GT_2(N)
 
 typedef int8_t  bv_sint8;
 typedef int32_t  bv_sint32;
@@ -585,6 +585,12 @@ namespace bsim {
   }
 
   template<int N>
+  static inline unsigned_int<N> operator*(const unsigned_int<N>& a,
+					const unsigned_int<N>& b) {
+    return unsigned_int_operations<N>::mul_general_width(a, b);
+  }
+
+  template<int N>
   static inline signed_int<N> operator+(const signed_int<N>& a,
 					const signed_int<N>& b) {
     return signed_int_operations<N>::add_general_width(a, b);
@@ -594,6 +600,12 @@ namespace bsim {
   static inline signed_int<N> operator-(const signed_int<N>& a,
 					const signed_int<N>& b) {
     return signed_int_operations<N>::sub_general_width(a, b);
+  }
+  
+  template<int N>
+  static inline signed_int<N> operator*(const signed_int<N>& a,
+					const signed_int<N>& b) {
+    return signed_int_operations<N>::mul_general_width(a, b);
   }
   
   template<int Width>

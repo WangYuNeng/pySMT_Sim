@@ -34,7 +34,8 @@ class CodeGenMgr:
             p_str = {key.symbol_name(): value for key, value in pattern.items()}
             p_tmp = []
             for arg in self.args:
-                payload = p_str[arg.name]._content.payload
+                assert p_str[arg.name].is_constant()
+                payload = p_str[arg.name].constant_value()
                 if isinstance(payload, Fraction):
                     val = str(payload.numerator / payload.denominator)
                 elif isinstance(payload, bool):
