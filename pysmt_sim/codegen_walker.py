@@ -69,19 +69,21 @@ class CodeGenWalker(DagWalker):
 
     def write_main(self, file):
         file.write("\nint main (int argc, char **argv) {\n"
-                    + "\tifstream file (argv[1]);\n"
-                    + "\tif (file.is_open()) {\n"
+                    + "\tifstream in_file (argv[1]);\n"
+                    + "\tofstream out_file (argv[2]);\n"
+                    + "\tif (in_file.is_open() && out_file.is_open()) {\n"
                     + "\t\tint num_line;\n"
-                    + "\t\tfile >> num_line;\n"
+                    + "\t\tin_file >> num_line;\n"
                     + "\t\tfor (int i = 0; i < num_line; ++i) {\n")
         file.writelines([f"\t\t\t{arg.type} var_{i};\n" for i, arg in enumerate(self.args)])
-        file.writelines([f"\t\t\tfile >> var_{i};\n" for i, _ in enumerate(self.args)])
-        file.write("\t\t\tcout << formula(" + 
+        file.writelines([f"\t\t\tin_file >> var_{i};\n" for i, _ in enumerate(self.args)])
+        file.write("\t\t\tout_file << formula(" + 
             ", ".join([f"var_{i}" for i, _ in enumerate(self.args)]) +
             ") << endl;\n"
         )
         file.write("\t\t}\n"
-                    + "\t\tfile.close();\n"
+                    + "\t\tin_file.close();\n"
+                    + "\t\tout_file.close();\n"
         	        + "\t}\n"
         	        + "\treturn 0;\n"
                     + "}\n"
