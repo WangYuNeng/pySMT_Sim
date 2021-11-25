@@ -7,6 +7,7 @@ https://github.com/dillonhuff/bsim/
 #include <bitset>
 #include <cassert>
 #include <iostream>
+#include <fstream>
 #include <stdint.h>
 #include <type_traits>
 
@@ -159,6 +160,16 @@ namespace bsim {
   }
 
   template<int N>
+  static inline std::ifstream& operator>> (std::ifstream& in, bit_vector<N>& a) {
+    int val;
+    in >> val;
+    a = val;
+
+    return in;
+  }
+
+
+  template<int N>
   static inline bool operator==(const bit_vector<N>& a,
 				const bit_vector<N>& b) {
     return a.equals(b);
@@ -173,6 +184,8 @@ namespace bsim {
     unsigned_int() {}
 
     unsigned_int(const std::string& bitstr) : bits(bitstr){}
+
+    unsigned_int(const int val) : bits(val) {}
 
     unsigned_int(const bit_vector<N>& bits_) : bits(bits_) {}
 
@@ -799,6 +812,43 @@ namespace bsim {
     bit_vector<N> res;
     for (int i = shift_val; i < N; i++) {
       res.set(i, a.get(i - shift_val));
+    }
+
+    return res;
+  }
+
+  // TODO: Make shift_val general
+  template<int N, int M>
+  static inline bit_vector<N>
+  arithmetic_right_shift(const bit_vector<N>& a,
+	     const bit_vector<M>& shift_val) {
+    bit_vector<N> res;
+    int shift = shift_val.as_native_uint32();
+    for (int i = 0; i < N-shift; i++) {
+      res.set(i, a.get(i + shift));
+    }
+    res.set(N-1, a.get(N-1));
+
+    return res;
+  }
+
+  template<int N, int M>
+  static inline bit_vector<N> operator << (const bit_vector<N>& a, const bit_vector<M>& shift_val) {
+    bit_vector<N> res;
+    int shift = shift_val.as_native_uint32();
+    for (int i = shift; i < N; i++) {
+      res.set(i, a.get(i - shift));
+    }
+
+    return res;
+  }
+
+  template<int N, int M>
+  static inline bit_vector<N> operator >> (const bit_vector<N>& a, const bit_vector<M>& shift_val) {
+    bit_vector<N> res;
+    int shift = shift_val.as_native_uint32();
+    for (int i = 0; i < N-shift; i++) {
+      res.set(i, a.get(i + shift));
     }
 
     return res;

@@ -1,11 +1,12 @@
 import functools as ft
 from collections import namedtuple
+import re
 from pysmt.shortcuts import Not
 import pysmt.typing as types
 import pysmt.operators as op
 from pysmt.walkers import DagWalker
 
-type_dict = {"Bool": "bool", "Int": "int", "Real": "double"}
+type_dict = {"Bool": "bool", "Int": "int", "Real": "double", "BV{}": "bit_vector<>"}
 includes = ["\"bit_vector.h\"", "<cmath>", "<fstream>"]
 Arg = namedtuple("Arg", ["name", "type"])
 
@@ -13,21 +14,27 @@ def get_type_str(formula):
     name = formula.get_type().basename
     if name in type_dict:
         return type_dict[name]
+    # Search BV
+    p = re.compile('BV\{\d+\}').match(name)
+    if p is not None:
+        return f"bit_vector<{name[3:-1]}>"
     raise NotImplementedError
 
-def walk_variadic(evaluate, op):
+def walk_variadic(evaluate, bv_type, op):
     def walk_op(self, formula, args, **kwargs):
         if len(args) == 1: # unary
             intermediate = f"({op}{args[0]})"
         else: # n-ary
-            intermediate = "(" + f" {op} ".join(args) + ")"
+            if bv_type == None:
+                intermediate = "(" + f" {op} ".join(args) + ")"
+            elif bv_type == "unsigned_int" or bv_type == "signed_int":
+                name = formula.get_type().basename
+                bv_size = name[3:-1]
+                intermediate = "((" + f" {op} ".join([f"({bv_type}<{bv_size}>){arg}" for arg in args]) + ").get_bits())"
+            else:
+                assert False, "bv_type only accept None, signed_int, or unsigned_int"
         if evaluate:
-            type_str = get_type_str(formula)
-            var = f"{type_str}{self.var_cnt[type_str]}"
-            declare = f"{type_str} {var} = {intermediate};"
-            self.code.append(declare)
-            self.var_cnt[type_str] += 1
-            return var
+            return self._create_new_var(formula, intermediate)
         else:
 	        return intermediate
     return walk_op
@@ -37,16 +44,23 @@ def walk_unsupported():
         raise NotImplementedError
     return walk_op
 
-walk_evaluate = ft.partial(walk_variadic, True)
-walk_intermediate = ft.partial(walk_variadic, False)
+walk_evaluate = ft.partial(walk_variadic, True, None)
+walk_intermediate = ft.partial(walk_variadic, False, None)
+walk_evaluate_bv_signed = ft.partial(walk_variadic, True, "signed_int")
+walk_evaluate_bv_unsigned = ft.partial(walk_variadic, True, "unsigned_int")
+walk_intermediate_bv_signed = ft.partial(walk_variadic, False, "signed_int")
+walk_intermediate_bv_unsigned = ft.partial(walk_variadic, False, "unsigned_int")
 
+def walk_cpp_function(func_name):
+    def walk_op(self, formula, args, **kwargs):
+        intermediate = f"{func_name}(" + ", ".join(args) + ")"
+        return intermediate
+    return walk_op
 class CodeGenWalker(DagWalker):
 
     def __init__(self):
         super().__init__()
-        self.var_cnt = {
-            item: 0 for item in type_dict.values()
-        }
+        self.var_cnt = {}
         self.code = []
         self.args = []
         self.headers = includes
@@ -57,6 +71,7 @@ class CodeGenWalker(DagWalker):
         with open(file_name, 'w') as f:
             f.writelines([f"#include {header}\n" for header in self.headers])
             f.write("\nusing namespace std;\n")
+            f.write("\nusing namespace bsim;\n")
             self.write_func(ret_type, ret, f)
             self.write_main(f)
             
@@ -88,7 +103,19 @@ class CodeGenWalker(DagWalker):
         	        + "\treturn 0;\n"
                     + "}\n"
         )
-            	
+
+    def _create_new_var(self, formula, value):
+        type_str = get_type_str(formula)
+        try:
+            self.var_cnt[type_str]
+        except KeyError:
+            self.var_cnt[type_str] = 0
+        var = f"{type_str}{self.var_cnt[type_str]}"
+        declare = f"{type_str} {var} = {value};"
+        self.code.append(declare)
+        self.var_cnt[type_str] += 1
+        return var
+
     def walk_symbol(self, formula, **kwargs):
         type_str = get_type_str(formula)
         name = formula.symbol_name()
@@ -100,27 +127,23 @@ class CodeGenWalker(DagWalker):
             ret = str(formula.constant_value()).lower()
         elif formula.constant_type().is_real_type() or formula.constant_type().is_int_type():
             ret = str(formula.constant_value())
+        elif formula.constant_type().is_bv_type():
+            name = formula.get_type().basename
+            bv_size = name[3:-1]
+            ret = f"(bit_vector<{bv_size}>)" + str(formula.constant_value())
         else:
             raise NotImplementedError
         return ret
 
     def walk_ite(self, formula, args, **kwargs):
         # ite(a, b, c) == a ? b : c
-        type_str = get_type_str(formula)
-        var = f"{type_str}{self.var_cnt[type_str]}"
-        declare = f"{type_str} {var} = {args[0]} ? {args[1]} : {args[2]};"
-        self.code.append(declare)
-        self.var_cnt[type_str] += 1
-        return var
+        value = f"{args[0]} ? {args[1]} : {args[2]};"
+        return self._create_new_var(formula, value)
 
     def walk_implies(self, formula, args, **kwargs):
         # a->b == !a || b
-        type_str = get_type_str(formula)
-        var = f"{type_str}{self.var_cnt[type_str]}"
-        declare = f"{type_str} {var} = !{args[0]} || {args[1]};"
-        self.code.append(declare)
-        self.var_cnt[type_str] += 1
-        return var
+        value = f"!{args[0]} || {args[1]};"
+        return self._create_new_var(formula, value)
 
     def walk_pow(self, formula, args, **kwargs):
         intermediate = "(" + f"pow({args[0]}, {args[1]}) " + ")"
@@ -129,6 +152,7 @@ class CodeGenWalker(DagWalker):
     walk_real_constant = _walk_constant
     walk_int_constant = _walk_constant
     walk_bool_constant = _walk_constant
+    walk_bv_constant = _walk_constant
 
     walk_not = walk_evaluate("!")
     walk_le = walk_evaluate("<=")
@@ -144,33 +168,32 @@ class CodeGenWalker(DagWalker):
     walk_times = walk_intermediate("*")
 
     
-    walk_bv_constant = walk_unsupported
-    walk_bv_neg = walk_unsupported
-    walk_bv_or = walk_unsupported
-    walk_bv_and = walk_unsupported
-    walk_bv_xor = walk_unsupported
-    walk_bv_add = walk_unsupported
-    walk_bv_sub = walk_unsupported
-    walk_bv_udiv = walk_unsupported
-    walk_bv_mul = walk_unsupported
+    walk_bv_neg = walk_intermediate("~")
+    walk_bv_or = walk_intermediate("|")
+    walk_bv_and = walk_intermediate("&")
+    walk_bv_xor = walk_intermediate("^")
+    walk_bv_add = walk_intermediate_bv_unsigned("+")
+    walk_bv_sub = walk_intermediate_bv_unsigned("-")
+    walk_bv_udiv = walk_intermediate_bv_unsigned("/")
+    walk_bv_mul = walk_intermediate_bv_unsigned("*")
     walk_bv_rol = walk_unsupported
     walk_bv_urem = walk_unsupported
-    walk_bv_lshl = walk_unsupported
+    walk_bv_lshl = walk_intermediate("<<")
     walk_bv_ror = walk_unsupported
-    walk_bv_sdiv = walk_unsupported
-    walk_bv_lshr = walk_unsupported
-    walk_bv_ashr = walk_unsupported
+    walk_bv_sdiv = walk_intermediate_bv_signed("/")
+    walk_bv_lshr = walk_intermediate(">>")
+    walk_bv_ashr = walk_cpp_function("arithmetic_right_shift")
     walk_bv_srem = walk_unsupported
     walk_bv_zext = walk_unsupported
     walk_bv_extract = walk_unsupported
     walk_bv_concat = walk_unsupported
     walk_bv_sext = walk_unsupported
-    walk_bv_ult = walk_unsupported
-    walk_bv_comp = walk_unsupported
-    walk_bv_slt = walk_unsupported
-    walk_bv_ule = walk_unsupported
+    walk_bv_ult = walk_intermediate_bv_unsigned("<")
+    walk_bv_comp = walk_intermediate("==")
+    walk_bv_slt = walk_intermediate_bv_signed("<")
+    walk_bv_ule = walk_intermediate_bv_unsigned("<=")
     walk_bv_tonatural = walk_unsupported
-    walk_bv_sle = walk_unsupported
+    walk_bv_sle = walk_intermediate_bv_signed("<=")
     walk_array_store = walk_unsupported
     walk_array_select = walk_unsupported
     walk_toreal = walk_unsupported
