@@ -20,6 +20,9 @@ def get_type_str(formula):
         return f"bit_vector<{name[3:-1]}>"
     raise NotImplementedError
 
+def legalize_symbol(symbol):
+    return re.sub("[.<>]", "_", symbol)
+
 def walk_variadic(evaluate, bv_type, op):
     def walk_op(self, formula, args, **kwargs):
         if len(args) == 1: # unary
@@ -39,8 +42,9 @@ def walk_variadic(evaluate, bv_type, op):
 	        return intermediate
     return walk_op
 
-def walk_unsupported():
+def walk_unsupported(name):
     def walk_op(self, formula, args, **kwargs):
+        print(name)
         raise NotImplementedError
     return walk_op
 
@@ -110,7 +114,7 @@ class CodeGenWalker(DagWalker):
             self.var_cnt[type_str]
         except KeyError:
             self.var_cnt[type_str] = 0
-        var = f"{type_str}{self.var_cnt[type_str]}"
+        var = legalize_symbol(f"{type_str}{self.var_cnt[type_str]}")
         declare = f"{type_str} {var} = {value};"
         self.code.append(declare)
         self.var_cnt[type_str] += 1
@@ -118,7 +122,7 @@ class CodeGenWalker(DagWalker):
 
     def walk_symbol(self, formula, **kwargs):
         type_str = get_type_str(formula)
-        name = formula.symbol_name()
+        name = legalize_symbol(formula.symbol_name())
         self.args.append(Arg(name, type_str))
         return name
 
@@ -176,29 +180,45 @@ class CodeGenWalker(DagWalker):
     walk_bv_sub = walk_intermediate_bv_unsigned("-")
     walk_bv_udiv = walk_intermediate_bv_unsigned("/")
     walk_bv_mul = walk_intermediate_bv_unsigned("*")
-    walk_bv_rol = walk_unsupported
-    walk_bv_urem = walk_unsupported
+    walk_bv_rol = walk_unsupported("walk_bv_rol")
+    walk_bv_urem = walk_unsupported("walk_bv_urem")
     walk_bv_lshl = walk_intermediate("<<")
-    walk_bv_ror = walk_unsupported
+    walk_bv_ror = walk_unsupported("walk_bv_ror")
     walk_bv_sdiv = walk_intermediate_bv_signed("/")
     walk_bv_lshr = walk_intermediate(">>")
     walk_bv_ashr = walk_cpp_function("arithmetic_right_shift")
-    walk_bv_srem = walk_unsupported
-    walk_bv_zext = walk_unsupported
-    walk_bv_extract = walk_unsupported
-    walk_bv_concat = walk_unsupported
-    walk_bv_sext = walk_unsupported
+    walk_bv_srem = walk_unsupported("walk_bv_srem")
+    walk_bv_zext = walk_unsupported("walk_bv_zext")
+    walk_bv_concat = walk_cpp_function("concat")
+    
+    def walk_bv_extract(self, formula, args, **kwargs):
+        # easier to handle args here than variadic function argument in c++
+        name = formula.get_type().basename
+        bv_size = name[3:-1]
+        if len(args) == 1:
+            start = 0
+            end = int(bv_size)-1
+        elif len(args) == 2:
+            start = args[1]
+            end = int(bv_size)-1
+        else:
+            start = args[1]
+            end = args[2]
+        intermediate = f"extract<{bv_size}>({args[0]}, {start}, {end})"
+        return intermediate
+
+    walk_bv_sext = walk_unsupported("walk_bv_sext")
     walk_bv_ult = walk_intermediate_bv_unsigned("<")
     walk_bv_comp = walk_intermediate("==")
     walk_bv_slt = walk_intermediate_bv_signed("<")
     walk_bv_ule = walk_intermediate_bv_unsigned("<=")
-    walk_bv_tonatural = walk_unsupported
+    walk_bv_tonatural = walk_unsupported("walk_bv_tonatural")
     walk_bv_sle = walk_intermediate_bv_signed("<=")
-    walk_array_store = walk_unsupported
-    walk_array_select = walk_unsupported
-    walk_toreal = walk_unsupported
-    walk_array_value = walk_unsupported
-    walk_quantifier = walk_unsupported
-    walk_function = walk_unsupported
-    walk_forall = walk_unsupported
-    walk_exists = walk_unsupported
+    walk_array_store = walk_unsupported(walk_unsupported)
+    walk_array_select = walk_unsupported(walk_unsupported)
+    walk_toreal = walk_unsupported(walk_unsupported)
+    walk_array_value = walk_unsupported(walk_unsupported)
+    walk_quantifier = walk_unsupported(walk_unsupported)
+    walk_function = walk_unsupported(walk_unsupported)
+    walk_forall = walk_unsupported(walk_unsupported)
+    walk_exists = walk_unsupported(walk_unsupported)

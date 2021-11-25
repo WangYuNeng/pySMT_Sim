@@ -1,6 +1,6 @@
 import os
 from fractions import Fraction
-from pysmt_sim.codegen_walker import CodeGenWalker
+from pysmt_sim.codegen_walker import CodeGenWalker, legalize_symbol
 
 class CodeGenMgr:
 
@@ -31,7 +31,7 @@ class CodeGenMgr:
 
     def add_pattern(self, patterns: list()):
         for pattern in patterns:
-            p_str = {key.symbol_name(): value for key, value in pattern.items()}
+            p_str = {legalize_symbol(key.symbol_name()): value for key, value in pattern.items()}
             p_tmp = []
             for arg in self.args:
                 assert p_str[arg.name].is_constant()

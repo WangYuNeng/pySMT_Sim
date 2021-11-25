@@ -854,6 +854,37 @@ namespace bsim {
     return res;
   }
 
+  // Returns the Concatenation of the two BVs
+  template<int N, int M>
+  static inline bit_vector<N+M>
+  concat(const bit_vector<N>& a,
+	     const bit_vector<M>& b) {
+    bit_vector<N+M> res;
+    for (int i = 0; i < N; i++) {
+      res.set(i, a.get(i));
+    }
+    for (int i = 0; i < M; i++) {
+      res.set(N+i, b.get(i));
+    }
+
+    return res;
+  }
+
+  // Returns the slice of formula from start to end (inclusive).
+  template<int M, int N>
+  static inline bit_vector<M>
+  extract(const bit_vector<N>& a,
+	     int start, int end) {
+    assert (end - start == M);
+    bit_vector<M> res;
+    for (int i = 0; i < M; i++) {
+      res.set(i, a.get(i+start));
+    }
+
+    return res;
+  }
+
+
   template<int N>
   static inline unsigned_int<N> operator/(const unsigned_int<N>& a,
 					  const unsigned_int<N>& b) {
