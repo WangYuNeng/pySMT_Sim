@@ -17,7 +17,7 @@ def get_type_str(formula):
     # Search BV
     p = re.compile('BV\{\d+\}').match(name)
     if p is not None:
-        return f"bit_vector<{name[3:-1]}>"
+        return f"bit_vector<{formula.bv_width()}>"
     raise NotImplementedError
 
 def legalize_symbol(symbol):
@@ -31,9 +31,8 @@ def walk_variadic(evaluate, bv_type, op):
             if bv_type == None:
                 intermediate = "(" + f" {op} ".join(args) + ")"
             elif bv_type == "unsigned_int" or bv_type == "signed_int":
-                name = formula.get_type().basename
-                bv_size = name[3:-1]
-                intermediate = "((" + f" {op} ".join([f"({bv_type}<{bv_size}>){arg}" for arg in args]) + ").get_bits())"
+                bv_width = formula.bv_width()
+                intermediate = "((" + f" {op} ".join([f"({bv_type}<{bv_width}>){arg}" for arg in args]) + ").get_bits())"
             else:
                 assert False, "bv_type only accept None, signed_int, or unsigned_int"
         if evaluate:
@@ -132,9 +131,7 @@ class CodeGenWalker(DagWalker):
         elif formula.constant_type().is_real_type() or formula.constant_type().is_int_type():
             ret = str(formula.constant_value())
         elif formula.constant_type().is_bv_type():
-            name = formula.get_type().basename
-            bv_size = name[3:-1]
-            ret = f"(bit_vector<{bv_size}>)" + str(formula.constant_value())
+            ret = f"(bit_vector<{formula.bv_width()}>)" + str(formula.constant_value())
         else:
             raise NotImplementedError
         return ret
@@ -193,18 +190,10 @@ class CodeGenWalker(DagWalker):
     
     def walk_bv_extract(self, formula, args, **kwargs):
         # easier to handle args here than variadic function argument in c++
-        name = formula.get_type().basename
-        bv_size = name[3:-1]
-        if len(args) == 1:
-            start = 0
-            end = int(bv_size)-1
-        elif len(args) == 2:
-            start = args[1]
-            end = int(bv_size)-1
-        else:
-            start = args[1]
-            end = args[2]
-        intermediate = f"extract<{bv_size}>({args[0]}, {start}, {end})"
+        bv_width = formula.bv_width()
+        start = formula.bv_extract_start()
+        end = formula.bv_extract_end()
+        intermediate = f"extract<{bv_width}>({args[0]}, {start}, {end})"
         return intermediate
 
     walk_bv_sext = walk_unsupported("walk_bv_sext")

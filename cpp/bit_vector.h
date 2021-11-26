@@ -855,16 +855,17 @@ namespace bsim {
   }
 
   // Returns the Concatenation of the two BVs
+  // concat(a, b) -> a will be in MSB side
   template<int N, int M>
   static inline bit_vector<N+M>
   concat(const bit_vector<N>& a,
 	     const bit_vector<M>& b) {
     bit_vector<N+M> res;
-    for (int i = 0; i < N; i++) {
-      res.set(i, a.get(i));
-    }
     for (int i = 0; i < M; i++) {
-      res.set(N+i, b.get(i));
+      res.set(i, b.get(i));
+    }
+    for (int i = 0; i < N; i++) {
+      res.set(M+i, a.get(i));
     }
 
     return res;
@@ -875,7 +876,7 @@ namespace bsim {
   static inline bit_vector<M>
   extract(const bit_vector<N>& a,
 	     int start, int end) {
-    assert (end - start == M);
+    assert (end - start + 1 == M);
     bit_vector<M> res;
     for (int i = 0; i < M; i++) {
       res.set(i, a.get(i+start));
