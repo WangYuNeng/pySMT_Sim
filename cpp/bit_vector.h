@@ -885,6 +885,15 @@ namespace bsim {
     return res;
   }
 
+  // Assume bv is signed
+  template<int N>
+  static inline bit_vector<N>
+  neg(const bit_vector<N>& a) {
+    int val = a.as_native_int32();
+    bit_vector<N> res(-val);
+
+    return res;
+  }
 
   template<int N>
   static inline unsigned_int<N> operator/(const unsigned_int<N>& a,

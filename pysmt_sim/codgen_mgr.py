@@ -20,7 +20,7 @@ class CodeGenMgr:
 
     def sim(self, in_file="sim_pattern", out_file="sim_result"):
         self._write_pattern()
-        os.system(f"./tmp {in_file} {out_file}")
+        assert os.system(f"./tmp {in_file} {out_file}") == 0
 
     def check_allsat(self, out_file="sim_result"):
         with open(out_file, "r") as file:
@@ -28,6 +28,21 @@ class CodeGenMgr:
                 if line != "1\n":
                     return False
             return True
+    
+    def check_match(self, match, out_file="sim_result"):
+        with open(out_file, "r") as file:
+            for i, line in enumerate(file.readlines()):
+                if line[0] != match[i]:
+                    return False
+            return True
+    
+    def check_unsat(self, out_file="sim_result"):
+        with open(out_file, "r") as file:
+            ret = []
+            for i, line in enumerate(file.readlines()):
+                if line[0] != "1\n":
+                    ret.append(i)
+            return ret
 
     def add_pattern(self, patterns: list()):
         for pattern in patterns:

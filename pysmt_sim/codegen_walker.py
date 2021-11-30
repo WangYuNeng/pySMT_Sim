@@ -21,7 +21,7 @@ def get_type_str(formula):
     raise NotImplementedError
 
 def legalize_symbol(symbol):
-    return re.sub("[.<>]", "_", symbol)
+    return re.sub("[^\w]", "_", symbol)
 
 def walk_variadic(evaluate, bv_type, op):
     def walk_op(self, formula, args, **kwargs):
@@ -131,7 +131,7 @@ class CodeGenWalker(DagWalker):
         elif formula.constant_type().is_real_type() or formula.constant_type().is_int_type():
             ret = str(formula.constant_value())
         elif formula.constant_type().is_bv_type():
-            ret = f"(bit_vector<{formula.bv_width()}>)" + str(formula.constant_value())
+            ret = f"(bit_vector<{formula.bv_width()}>)(bv_uint32)" + str(formula.constant_value())
         else:
             raise NotImplementedError
         return ret
@@ -169,7 +169,8 @@ class CodeGenWalker(DagWalker):
     walk_times = walk_intermediate("*")
 
     
-    walk_bv_neg = walk_intermediate("~")
+    walk_bv_neg = walk_cpp_function("neg")
+    walk_bv_not = walk_intermediate("~")
     walk_bv_or = walk_intermediate("|")
     walk_bv_and = walk_intermediate("&")
     walk_bv_xor = walk_intermediate("^")
